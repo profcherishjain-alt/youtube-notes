@@ -185,7 +185,7 @@
   <div class="status-dot checking" id="sdot"></div>
   <span id="stext">Server check ho raha hai...</span>
   <span style="margin-left:auto;color:var(--text-dim)">Server URL:</span>
-  <input id="server-url" value="https://youtube-notes-64rt.onrender.com/" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:3px;width:200px;outline:none;" onchange="checkServer()"/>
+  <input id="server-url" value="http://localhost:3000" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:3px;width:200px;outline:none;" onchange="checkServer()"/>
 </div>
 
 <div id="main">
@@ -231,7 +231,7 @@ let SERVER = 'http://localhost:3000';
 let player = null;
 let notes = [];
 let videoId = null;
-let storyboardSpec = null;
+// Puppeteer server se exact frames aate hain
 
 // ─── Server URL from input ─────────────────────────────
 document.getElementById('server-url').addEventListener('change', function() {
@@ -247,7 +247,7 @@ async function checkServer() {
   dot.className = 'status-dot checking';
   txt.textContent = 'Server check ho raha hai...';
   try {
-    const r = await fetch(`${SERVER}/api/storyboard?videoId=test`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${SERVER}/api/health`, { signal: AbortSignal.timeout(4000) });
     dot.className = 'status-dot ok';
     txt.textContent = `Server connected ✓ — ${SERVER}`;
   } catch(e) {
@@ -282,7 +282,6 @@ function loadVideo() {
   if (window.YT && YT.Player) initPlayer(videoId);
 
   // Storyboard spec bhi fetch karo
-  fetchStoryboard(videoId);
   localStorage.setItem('vn_url', url);
 }
 
@@ -295,91 +294,25 @@ function initPlayer(vid) {
   });
 }
 
-// ─── Storyboard Spec Fetch ─────────────────────────────
-async function fetchStoryboard(vid) {
-  try {
-    const r = await fetch(`${SERVER}/api/storyboard?videoId=${vid}`);
-    const data = await r.json();
-    if (data.spec) {
-      storyboardSpec = parseStoryboardSpec(data.spec);
-      showToast('Exact frame capture ready ✓');
-    }
-  } catch(e) {
-    console.warn('Storyboard fetch failed:', e.message);
-  }
-}
-
-// Parse YouTube storyboard spec string
-// Format: url|w|h|count|count_x|count_y|duration_ms|... (multiple levels)
-function parseStoryboardSpec(spec) {
-  const levels = spec.split('|');
-  const boards = [];
-  for (let i = 0; i < levels.length; i++) {
-    const parts = levels[i].split('#');
-    if (parts.length < 8) continue;
-    try {
-      boards.push({
-        urlTemplate: parts[0],
-        thumbW: parseInt(parts[1]),
-        thumbH: parseInt(parts[2]),
-        thumbCount: parseInt(parts[3]),
-        cols: parseInt(parts[4]),
-        rows: parseInt(parts[5]),
-        durationMs: parseInt(parts[6]),
-        // sigh: sBoard count
-        sheetCount: parseInt(parts[7]) || 1
-      });
-    } catch(e) {}
-  }
-  // Pick highest resolution level
-  return boards.sort((a,b) => b.thumbW - a.thumbW)[0] || null;
-}
-
-// ─── Get Exact Frame for a Timestamp ──────────────────
-// Returns a promise that resolves to a data URL (base64 image)
+// ─── Exact Frame via Puppeteer Server ─────────────────
+// Server headless Chrome se exact frame screenshot leta hai
 async function getExactFrame(seconds) {
-  if (!storyboardSpec || !videoId) {
-    // Fallback: best YouTube thumbnail
+  if (!videoId) return null;
+  try {
+    const url = `${SERVER}/api/frame?videoId=${videoId}&t=${seconds}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Frame fetch failed: ' + response.status);
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch(e) {
+    console.warn('Frame capture failed:', e.message);
     return null;
   }
-
-  const sb = storyboardSpec;
-  const ms = seconds * 1000;
-  const frameIndex = Math.floor(ms / sb.durationMs);
-  const sheetIndex = Math.floor(frameIndex / (sb.cols * sb.rows));
-  const indexInSheet = frameIndex % (sb.cols * sb.rows);
-  const col = indexInSheet % sb.cols;
-  const row = Math.floor(indexInSheet / sb.cols);
-
-  // Build tile URL from template
-  // Template has $M (sheet index), $N (sequential number)
-  let tileUrl = sb.urlTemplate
-    .replace(/\$M/g, sheetIndex)
-    .replace(/\$N/g, sheetIndex);
-
-  // Fetch tile via proxy
-  const proxyUrl = `${SERVER}/api/tile?url=${encodeURIComponent(tileUrl)}`;
-
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      // Crop exact frame from the sprite sheet
-      const canvas = document.createElement('canvas');
-      canvas.width = sb.thumbW;
-      canvas.height = sb.thumbH;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img,
-        col * sb.thumbW, row * sb.thumbH,
-        sb.thumbW, sb.thumbH,
-        0, 0,
-        sb.thumbW, sb.thumbH
-      );
-      resolve(canvas.toDataURL('image/jpeg', 0.9));
-    };
-    img.onerror = () => resolve(null);
-    img.src = proxyUrl;
-  });
 }
 
 // ─── Add Note ─────────────────────────────────────────
