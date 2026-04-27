@@ -1,19 +1,17 @@
-// VideoNotes — Proxy Server
-// YouTube ke exact frame fetch karne ke liye
-// 
-// Setup:
-//   npm install express axios cors
+// VideoNotes — Puppeteer Screenshot Server
+// Exact frame capture karta hai YouTube videos ka
+//
+// Local setup:
+//   npm install express cors puppeteer
 //   node server.js
 //
-// Deploy on Render.com (free):
-//   1. GitHub pe push karo
-//   2. render.com pe "New Web Service" banao
-//   3. Build command: npm install
-//   4. Start command: node server.js
+// Render.com deploy:
+//   Build Command: npm install && npx puppeteer browsers install chrome
+//   Start Command: node server.js
 
 const express = require('express');
-const axios = require('axios');
 const cors = require('cors');
+const puppeteer = require('puppeteer');
 const path = require('path');
 
 const app = express();
@@ -22,59 +20,77 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.static(path.join(__dirname)));
 
-// YouTube storyboard data fetch karna
-// Ye endpoint video ka storyboard spec return karta hai
-app.get('/api/storyboard', async (req, res) => {
-  const { videoId } = req.query;
-  if (!videoId) return res.status(400).json({ error: 'videoId required' });
+let browserInstance = null;
 
+async function getBrowser() {
+  if (browserInstance && browserInstance.connected) return browserInstance;
+  browserInstance = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+    ]
+  });
+  return browserInstance;
+}
+
+// GET /api/frame?videoId=xxx&t=123
+app.get('/api/frame', async (req, res) => {
+  const { videoId, t } = req.query;
+  if (!videoId || t === undefined) {
+    return res.status(400).json({ error: 'videoId aur t (seconds) chahiye' });
+  }
+
+  const seconds = Math.max(0, parseInt(t) || 0);
+  console.log(`📸 Frame capture: ${videoId} @ ${seconds}s`);
+
+  let page = null;
   try {
-    // YouTube's internal video info endpoint
-    const response = await axios.get(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-      }
-    });
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 720 });
 
-    const html = response.data;
+    const embedUrl = `https://www.youtube.com/embed/${videoId}?start=${seconds}&autoplay=1&mute=1&controls=0&disablekb=1&fs=0&rel=0&modestbranding=1`;
 
-    // Extract storyboard spec from YouTube's ytInitialPlayerResponse
-    const match = html.match(/"storyboards":\{"playerStoryboardSpecRenderer":\{"spec":"([^"]+)"/);
-    if (!match) {
-      return res.status(404).json({ error: 'Storyboard nahi mila', fallback: true });
+    await page.goto(embedUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+    await page.waitForSelector('video', { timeout: 10000 }).catch(() => {});
+    await new Promise(r => setTimeout(r, 2500));
+
+    const videoEl = await page.$('video');
+    let screenshotBuffer;
+
+    if (videoEl) {
+      screenshotBuffer = await videoEl.screenshot({ type: 'jpeg', quality: 90 });
+    } else {
+      screenshotBuffer = await page.screenshot({ type: 'jpeg', quality: 85 });
     }
 
-    const spec = decodeURIComponent(match[1]);
-    res.json({ spec, videoId });
+    res.set('Content-Type', 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(screenshotBuffer);
+    console.log(`✅ Done: ${videoId} @ ${seconds}s`);
   } catch (err) {
-    console.error('Storyboard fetch error:', err.message);
+    console.error('❌ Failed:', err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (page) await page.close().catch(() => {});
   }
 });
 
-// YouTube storyboard image tile proxy (CORS bypass)
-app.get('/api/tile', async (req, res) => {
-  const { url } = req.query;
-  if (!url) return res.status(400).send('url required');
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-  try {
-    const response = await axios.get(decodeURIComponent(url), {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://www.youtube.com/'
-      }
-    });
-
-    res.set('Content-Type', response.headers['content-type'] || 'image/webp');
-    res.set('Cache-Control', 'public, max-age=3600');
-    res.send(response.data);
-  } catch (err) {
-    res.status(500).send('Tile fetch failed');
-  }
+app.listen(PORT, async () => {
+  console.log(`✅ Server: http://localhost:${PORT}`);
+  try { await getBrowser(); console.log('✅ Browser ready!'); }
+  catch (e) { console.warn('⚠️ Browser pre-warm failed:', e.message); }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ VideoNotes server chal raha hai: http://localhost:${PORT}`);
+process.on('SIGTERM', async () => {
+  if (browserInstance) await browserInstance.close();
+  process.exit(0);
 });
