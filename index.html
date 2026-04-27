@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VideoNotes — Exact Frame Capture</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,600;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface2: #1c1c27;
+    --border: #2a2a3d;
+    --accent: #f0c040;
+    --accent2: #e05050;
+    --green: #40c080;
+    --text: #e8e8f0;
+    --text-dim: #7a7a99;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+    --display: 'Bebas Neue', cursive;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; overflow-x:hidden; }
+
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 28px; border-bottom:1px solid var(--border);
+    background:var(--surface); position:sticky; top:0; z-index:100;
+  }
+  .logo { font-family:var(--display); font-size:26px; letter-spacing:2px; color:var(--accent); }
+  .logo span { color:var(--text-dim); font-size:11px; font-family:var(--mono); margin-left:10px; letter-spacing:0; }
+
+  #url-section {
+    padding:14px 28px; background:var(--surface);
+    border-bottom:1px solid var(--border);
+    display:flex; gap:10px; align-items:center;
+  }
+  #url-input {
+    flex:1; background:var(--bg); border:1px solid var(--border);
+    color:var(--text); font-family:var(--mono); font-size:13px;
+    padding:9px 14px; outline:none; border-radius:4px; transition:border-color 0.2s;
+  }
+  #url-input:focus { border-color:var(--accent); }
+  #url-input::placeholder { color:var(--text-dim); }
+
+  .btn {
+    background:var(--accent); color:#000; border:none;
+    font-family:var(--display); font-size:16px; letter-spacing:1px;
+    padding:9px 20px; cursor:pointer; border-radius:4px;
+    transition:opacity 0.2s, transform 0.1s; white-space:nowrap;
+  }
+  .btn:hover { opacity:0.85; }
+  .btn:active { transform:scale(0.97); }
+  .btn.sec { background:var(--surface2); color:var(--text); border:1px solid var(--border); font-family:var(--sans); font-size:13px; font-weight:600; letter-spacing:0; }
+
+  #main { display:grid; grid-template-columns:1fr 420px; height:calc(100vh - 109px); }
+
+  #video-panel { display:flex; flex-direction:column; border-right:1px solid var(--border); }
+  #video-wrapper { flex:1; background:#000; position:relative; }
+  #video-wrapper iframe { width:100%; height:100%; border:none; display:block; }
+
+  #placeholder {
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:center; height:100%; gap:14px; color:var(--text-dim);
+  }
+  #placeholder .ico { font-size:56px; opacity:0.25; }
+  #placeholder p { font-family:var(--mono); font-size:12px; }
+
+  #note-controls {
+    padding:12px 18px; background:var(--surface);
+    border-top:1px solid var(--border); display:flex; gap:10px; align-items:flex-end;
+  }
+  #note-input {
+    flex:1; background:var(--bg); border:1px solid var(--border);
+    color:var(--text); font-family:var(--sans); font-size:14px;
+    padding:9px 12px; outline:none; border-radius:4px;
+    resize:none; height:42px; max-height:120px; overflow:auto;
+    transition:border-color 0.2s; line-height:1.5;
+  }
+  #note-input:focus { border-color:var(--accent); }
+  #note-input::placeholder { color:var(--text-dim); }
+
+  /* Notes Panel */
+  #notes-panel { display:flex; flex-direction:column; overflow:hidden; background:var(--bg); }
+  #notes-header {
+    padding:14px 18px; background:var(--surface);
+    border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  #notes-header h2 { font-family:var(--display); font-size:22px; letter-spacing:1px; color:var(--accent); }
+  .count { font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--surface2); padding:3px 10px; border-radius:20px; }
+
+  #notes-list { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:12px; }
+  #notes-list::-webkit-scrollbar { width:3px; }
+  #notes-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+  .note-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:6px; overflow:hidden;
+    animation:fadeIn 0.3s ease; transition:border-color 0.2s;
+  }
+  .note-card:hover { border-color:var(--accent); }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+
+  .frame-container {
+    width:100%; height:148px; background:#000;
+    overflow:hidden; position:relative; cursor:pointer;
+  }
+  .frame-container canvas { width:100%; height:100%; object-fit:cover; display:block; }
+  .frame-container img { width:100%; height:100%; object-fit:cover; display:block; }
+  .frame-loading {
+    position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; background:#000; gap:6px;
+    font-family:var(--mono); font-size:11px; color:var(--accent);
+  }
+  .dot { width:5px; height:5px; border-radius:50%; background:var(--accent); animation:pulse 0.7s infinite alternate; }
+  .dot:nth-child(2) { animation-delay:0.2s; }
+  .dot:nth-child(3) { animation-delay:0.4s; }
+  @keyframes pulse { from { opacity:0.2; } to { opacity:1; } }
+
+  .note-body { padding:10px 14px; }
+  .note-time {
+    display:inline-block; font-family:var(--mono); font-size:11px; font-weight:600;
+    color:#000; background:var(--accent); padding:2px 8px; border-radius:3px;
+    margin-bottom:8px; cursor:pointer; transition:opacity 0.2s;
+  }
+  .note-time:hover { opacity:0.8; }
+  .note-text { font-size:13px; font-weight:300; line-height:1.6; word-break:break-word; }
+  .note-actions { display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .note-del { background:none; border:1px solid var(--border); color:var(--text-dim); font-family:var(--mono); font-size:11px; padding:4px 10px; cursor:pointer; border-radius:3px; transition:all 0.2s; }
+  .note-del:hover { border-color:var(--accent2); color:var(--accent2); }
+  .frame-badge { font-family:var(--mono); font-size:10px; color:var(--text-dim); }
+
+  #export-bar { padding:12px 14px; background:var(--surface); border-top:1px solid var(--border); display:flex; gap:8px; }
+
+  #empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:10px; color:var(--text-dim); text-align:center; padding:40px; }
+  #empty-state .big { font-size:40px; opacity:0.2; }
+  #empty-state p { font-size:12px; font-family:var(--mono); line-height:1.7; }
+
+  /* Server status */
+  #server-status {
+    display:flex; align-items:center; gap:8px;
+    padding:10px 18px; background:var(--surface2);
+    border-bottom:1px solid var(--border); font-family:var(--mono); font-size:11px;
+  }
+  .status-dot { width:8px; height:8px; border-radius:50%; }
+  .status-dot.ok { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .status-dot.err { background:var(--accent2); }
+  .status-dot.checking { background:var(--accent); animation:pulse 1s infinite alternate; }
+
+  #toast {
+    position:fixed; bottom:28px; left:50%; transform:translateX(-50%) translateY(70px);
+    background:var(--accent); color:#000; font-family:var(--mono); font-size:12px; font-weight:600;
+    padding:9px 22px; border-radius:4px; transition:transform 0.3s ease;
+    z-index:999; pointer-events:none;
+  }
+  #toast.show { transform:translateX(-50%) translateY(0); }
+
+  .info-tip {
+    margin:10px 14px 0; background:var(--surface2); border:1px solid var(--border);
+    border-radius:5px; padding:10px 14px; font-family:var(--mono); font-size:11px;
+    color:var(--text-dim); line-height:1.8;
+  }
+  .info-tip strong { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">VideoNotes <span>// Exact Frame Capture</span></div>
+  <div style="display:flex;gap:8px;">
+    <button class="btn sec" onclick="exportHTML()">📄 Export</button>
+    <button class="btn sec" onclick="exportJSON()">💾 JSON</button>
+  </div>
+</header>
+
+<div id="url-section">
+  <input type="text" id="url-input" placeholder="YouTube URL — https://youtube.com/watch?v=..."/>
+  <button class="btn" onclick="loadVideo()">▶ Load</button>
+</div>
+
+<!-- Server status bar -->
+<div id="server-status">
+  <div class="status-dot checking" id="sdot"></div>
+  <span id="stext">Server check ho raha hai...</span>
+  <span style="margin-left:auto;color:var(--text-dim)">Server URL:</span>
+  <input id="server-url" value="http://localhost:3000" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:3px;width:200px;outline:none;" onchange="checkServer()"/>
+</div>
+
+<div id="main">
+  <div id="video-panel">
+    <div id="video-wrapper">
+      <div id="placeholder">
+        <div class="ico">▶</div>
+        <p>YouTube URL daalo — video yahan play hoga</p>
+      </div>
+    </div>
+    <div id="note-controls">
+      <textarea id="note-input" placeholder="Note likho → Enter (screenshot automatically lega exact frame ka!)"></textarea>
+      <button class="btn" onclick="addNote()">📌 Note</button>
+    </div>
+  </div>
+
+  <div id="notes-panel">
+    <div id="notes-header">
+      <h2>NOTES</h2>
+      <span class="count" id="count">0 notes</span>
+    </div>
+    <div class="info-tip">
+      <strong>Exact Frame:</strong> Note lete waqt video ka exact frame save hoga<br>
+      <strong>Click:</strong> Frame ya time pe click → video wahan jump karega
+    </div>
+    <div id="notes-list">
+      <div id="empty-state">
+        <div class="big">📝</div>
+        <p>Server chalao, video load karo<br>aur notes lena shuru karo!</p>
+      </div>
+    </div>
+    <div id="export-bar">
+      <button class="btn sec" style="flex:1" onclick="clearAll()">🗑 Clear All</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── Config ───────────────────────────────────────────
+let SERVER = 'http://localhost:3000';
+let player = null;
+let notes = [];
+let videoId = null;
+let storyboardSpec = null;
+
+// ─── Server URL from input ─────────────────────────────
+document.getElementById('server-url').addEventListener('change', function() {
+  SERVER = this.value.trim().replace(/\/$/, '');
+  checkServer();
+});
+
+// ─── Server Health Check ───────────────────────────────
+async function checkServer() {
+  SERVER = document.getElementById('server-url').value.trim().replace(/\/$/, '');
+  const dot = document.getElementById('sdot');
+  const txt = document.getElementById('stext');
+  dot.className = 'status-dot checking';
+  txt.textContent = 'Server check ho raha hai...';
+  try {
+    const r = await fetch(`${SERVER}/api/storyboard?videoId=test`, { signal: AbortSignal.timeout(3000) });
+    dot.className = 'status-dot ok';
+    txt.textContent = `Server connected ✓ — ${SERVER}`;
+  } catch(e) {
+    dot.className = 'status-dot err';
+    txt.textContent = `Server nahi mila. "node server.js" run karo ya URL change karo.`;
+  }
+}
+checkServer();
+
+// ─── YouTube IFrame API ────────────────────────────────
+const ytScript = document.createElement('script');
+ytScript.src = 'https://www.youtube.com/iframe_api';
+document.head.appendChild(ytScript);
+
+window.onYouTubeIframeAPIReady = () => {
+  if (videoId) initPlayer(videoId);
+};
+
+function extractVideoId(url) {
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function loadVideo() {
+  const url = document.getElementById('url-input').value.trim();
+  videoId = extractVideoId(url);
+  if (!videoId) { showToast('Valid YouTube URL nahi hai!'); return; }
+
+  document.getElementById('video-wrapper').innerHTML = '<div id="yt-player"></div>';
+  storyboardSpec = null;
+
+  if (window.YT && YT.Player) initPlayer(videoId);
+
+  // Storyboard spec bhi fetch karo
+  fetchStoryboard(videoId);
+  localStorage.setItem('vn_url', url);
+}
+
+function initPlayer(vid) {
+  player = new YT.Player('yt-player', {
+    videoId: vid,
+    width: '100%', height: '100%',
+    playerVars: { autoplay: 1, rel: 0, modestbranding: 1 },
+    events: { onReady: () => showToast('Video load! 🎬') }
+  });
+}
+
+// ─── Storyboard Spec Fetch ─────────────────────────────
+async function fetchStoryboard(vid) {
+  try {
+    const r = await fetch(`${SERVER}/api/storyboard?videoId=${vid}`);
+    const data = await r.json();
+    if (data.spec) {
+      storyboardSpec = parseStoryboardSpec(data.spec);
+      showToast('Exact frame capture ready ✓');
+    }
+  } catch(e) {
+    console.warn('Storyboard fetch failed:', e.message);
+  }
+}
+
+// Parse YouTube storyboard spec string
+// Format: url|w|h|count|count_x|count_y|duration_ms|... (multiple levels)
+function parseStoryboardSpec(spec) {
+  const levels = spec.split('|');
+  const boards = [];
+  for (let i = 0; i < levels.length; i++) {
+    const parts = levels[i].split('#');
+    if (parts.length < 8) continue;
+    try {
+      boards.push({
+        urlTemplate: parts[0],
+        thumbW: parseInt(parts[1]),
+        thumbH: parseInt(parts[2]),
+        thumbCount: parseInt(parts[3]),
+        cols: parseInt(parts[4]),
+        rows: parseInt(parts[5]),
+        durationMs: parseInt(parts[6]),
+        // sigh: sBoard count
+        sheetCount: parseInt(parts[7]) || 1
+      });
+    } catch(e) {}
+  }
+  // Pick highest resolution level
+  return boards.sort((a,b) => b.thumbW - a.thumbW)[0] || null;
+}
+
+// ─── Get Exact Frame for a Timestamp ──────────────────
+// Returns a promise that resolves to a data URL (base64 image)
+async function getExactFrame(seconds) {
+  if (!storyboardSpec || !videoId) {
+    // Fallback: best YouTube thumbnail
+    return null;
+  }
+
+  const sb = storyboardSpec;
+  const ms = seconds * 1000;
+  const frameIndex = Math.floor(ms / sb.durationMs);
+  const sheetIndex = Math.floor(frameIndex / (sb.cols * sb.rows));
+  const indexInSheet = frameIndex % (sb.cols * sb.rows);
+  const col = indexInSheet % sb.cols;
+  const row = Math.floor(indexInSheet / sb.cols);
+
+  // Build tile URL from template
+  // Template has $M (sheet index), $N (sequential number)
+  let tileUrl = sb.urlTemplate
+    .replace(/\$M/g, sheetIndex)
+    .replace(/\$N/g, sheetIndex);
+
+  // Fetch tile via proxy
+  const proxyUrl = `${SERVER}/api/tile?url=${encodeURIComponent(tileUrl)}`;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // Crop exact frame from the sprite sheet
+      const canvas = document.createElement('canvas');
+      canvas.width = sb.thumbW;
+      canvas.height = sb.thumbH;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img,
+        col * sb.thumbW, row * sb.thumbH,
+        sb.thumbW, sb.thumbH,
+        0, 0,
+        sb.thumbW, sb.thumbH
+      );
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = () => resolve(null);
+    img.src = proxyUrl;
+  });
+}
+
+// ─── Add Note ─────────────────────────────────────────
+async function addNote() {
+  const input = document.getElementById('note-input');
+  const text = input.value.trim();
+  if (!text) { showToast('Note khali hai!'); return; }
+  if (!videoId) { showToast('Pehle video load karo!'); return; }
+
+  const time = getCurrentTime();
+  const timeStr = formatTime(time);
+  const id = Date.now();
+
+  // Optimistically add note with loading state
+  const note = { id, text, time, timeStr, timeSeconds: Math.floor(time), videoId, frameDataUrl: null, frameLoading: true };
+  notes.unshift(note);
+  input.value = '';
+  input.style.height = '42px';
+  renderNotes();
+  showToast(`Note save @ ${timeStr} — frame capture ho raha hai...`);
+
+  // Capture exact frame in background
+  const frameDataUrl = await getExactFrame(Math.floor(time));
+  note.frameDataUrl = frameDataUrl;
+  note.frameLoading = false;
+  renderNotes();
+  if (frameDataUrl) showToast(`Exact frame captured! @ ${timeStr} 📸`);
+  save();
+}
+
+function getCurrentTime() {
+  try { return player && player.getCurrentTime ? player.getCurrentTime() : 0; }
+  catch(e) { return 0; }
+}
+
+function formatTime(s) {
+  s = Math.floor(s);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`;
+  return `${pad(m)}:${pad(sec)}`;
+}
+function pad(n) { return String(n).padStart(2,'0'); }
+
+function seekTo(seconds) {
+  try {
+    player.seekTo(seconds, true);
+    player.playVideo();
+    showToast(`⏩ ${formatTime(seconds)} pe gaya`);
+  } catch(e) {}
+}
+
+function deleteNote(id) {
+  notes = notes.filter(n => n.id !== id);
+  renderNotes(); save();
+  showToast('Note delete ho gaya');
+}
+
+function clearAll() {
+  if (!notes.length) { showToast('Koi note nahi!'); return; }
+  if (confirm('Sare notes delete karna chahte ho?')) {
+    notes = []; renderNotes(); save();
+    showToast('Sab clear!');
+  }
+}
+
+// ─── Render ────────────────────────────────────────────
+function renderNotes() {
+  const list = document.getElementById('notes-list');
+  document.getElementById('count').textContent = `${notes.length} note${notes.length!==1?'s':''}`;
+
+  if (!notes.length) {
+    list.innerHTML = `<div id="empty-state"><div class="big">📝</div><p>Abhi koi note nahi hai.<br>Video chalao aur notes lo!</p></div>`;
+    return;
+  }
+
+  list.innerHTML = notes.map(n => `
+    <div class="note-card">
+      <div class="frame-container" onclick="seekTo(${n.timeSeconds})" title="Click: is time pe jaao">
+        ${n.frameLoading
+          ? `<div class="frame-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div> frame capture ho raha hai</div>`
+          : n.frameDataUrl
+            ? `<img src="${n.frameDataUrl}" alt="Frame @ ${n.timeStr}" style="width:100%;height:100%;object-fit:cover;display:block;"/>`
+            : `<img src="https://img.youtube.com/vi/${n.videoId}/hqdefault.jpg" alt="Thumbnail" style="width:100%;height:100%;object-fit:cover;display:block;"/>`
+        }
+      </div>
+      <div class="note-body">
+        <div class="note-time" onclick="seekTo(${n.timeSeconds})">⏱ ${n.timeStr}</div>
+        <div class="note-text">${esc(n.text)}</div>
+        <div class="note-actions">
+          <span class="frame-badge">${n.frameDataUrl ? '📸 Exact frame' : n.frameLoading ? '⏳ Loading...' : '🖼 Thumbnail'}</span>
+          <button class="note-del" onclick="deleteNote(${n.id})">✕ Delete</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// ─── Export ────────────────────────────────────────────
+function exportHTML() {
+  if (!notes.length) { showToast('Notes nahi hain!'); return; }
+  const rows = notes.map(n => `
+    <div style="page-break-inside:avoid;margin-bottom:28px;border:1px solid #ddd;border-radius:8px;overflow:hidden;">
+      ${n.frameDataUrl
+        ? `<img src="${n.frameDataUrl}" style="width:100%;height:180px;object-fit:cover;display:block;"/>`
+        : `<img src="https://img.youtube.com/vi/${n.videoId}/hqdefault.jpg" style="width:100%;height:180px;object-fit:cover;display:block;"/>`
+      }
+      <div style="padding:14px 18px;">
+        <span style="background:#f0c040;color:#000;font-family:monospace;font-size:12px;font-weight:bold;padding:2px 9px;border-radius:3px;">${n.timeStr}</span>
+        <p style="margin-top:10px;font-family:sans-serif;font-size:14px;line-height:1.7;color:#222;">${n.text.replace(/\n/g,'<br>')}</p>
+      </div>
+    </div>`).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Video Notes</title>
+  <style>body{font-family:sans-serif;max-width:720px;margin:40px auto;color:#111;}h1{font-size:24px;border-bottom:3px solid #f0c040;padding-bottom:10px;margin-bottom:8px;}sub{color:#888;font-size:12px;display:block;margin-bottom:28px;}</style>
+  </head><body><h1>📹 Video Notes</h1><sub>Source: ${esc(document.getElementById('url-input').value)} · ${notes.length} notes</sub>${rows}</body></html>`;
+
+  dl(new Blob([html],{type:'text/html'}), 'video-notes.html');
+  showToast('Export ho gaya! 📄');
+}
+
+function exportJSON() {
+  if (!notes.length) { showToast('Notes nahi hain!'); return; }
+  dl(new Blob([JSON.stringify(notes.map(n=>({time:n.timeStr,seconds:n.timeSeconds,text:n.text,frame:n.frameDataUrl?'[base64]':'thumbnail'})),null,2)],{type:'application/json'}), 'video-notes.json');
+  showToast('JSON save! 💾');
+}
+
+function dl(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name; a.click();
+}
+
+// ─── Persistence ───────────────────────────────────────
+function save() {
+  try {
+    // Save without large base64 frames for speed; frames are regenerated
+    const slim = notes.map(n => ({...n, frameDataUrl: n.frameDataUrl}));
+    localStorage.setItem('vn_notes', JSON.stringify(slim));
+  } catch(e) {}
+}
+
+function loadSaved() {
+  try {
+    const s = localStorage.getItem('vn_notes');
+    if (s) { notes = JSON.parse(s); renderNotes(); }
+    const url = localStorage.getItem('vn_url');
+    if (url) document.getElementById('url-input').value = url;
+  } catch(e) {}
+}
+loadSaved();
+
+// ─── Note input auto-grow + Enter ─────────────────────
+document.getElementById('note-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(); return; }
+  setTimeout(() => {
+    this.style.height = '42px';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  }, 0);
+});
+
+// ─── Toast ─────────────────────────────────────────────
+let toastT;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove('show'), 2800);
+}
+</script>
+</body>
+</html>
